@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ANSI colors (modifiable)
+RED="\033[31m" GREEN="\033[32m" YELLOW="\033[33m" BLUE="\033[34m" BOLD="\033[1m" RESET="\033[0m"
+
+# Prefix for all output
+PREFIX="gsynch: "
+
+# Default values
+REMOTE="" BRANCH="" URL=""
+
+ONLY_PATH=""
+DRY_RUN=0
+FORCE=0
+NO_COMMIT=0
+
+show_help() {
+    echo -e "
+${BOLD}gsynch - synchs current directory with a git repository${RESET}
+
+Usage:
+  gsynch [options]
+
+Options:
+  --remote <name>       Remote name (default: r2)
+  --branch <branch>     Branch name (default: main)
+  --url <url>           Remote URL
+  --only <path>         Sync only a subdirectory
+  --dry-run             Show what would happen without modifying anything
+  --force               Override safety checks
+  --no-commit           Apply changes but do not commit
+  -h, --help            Show this help message
+"
+}
+
+# Parse arguments
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --remote)    REMOTE="$2";    shift 2 ;;
+        --branch)    BRANCH="$2";    shift 2 ;;
+        --url)       URL="$2";       shift 2 ;;
+        --only)      ONLY_PATH="$2"; shift 2 ;;
+        --dry-run)   DRY_RUN=1;      shift ;;
+        --force)     FORCE=1;        shift ;;
+        --no-commit) NO_COMMIT=1;    shift ;;
+
+        -h|--help)   show_help;      exit 0 ;;
+
+        *) echo -e "${RED}${PREFIX}Unknown argument:${RESET} $1"; exit 1 ;;
+    esac
+done
+
+# --- Required variables ------------------------------------------------------
+
+local missing=0
+
+if [ -z "$REMOTE" ]; then
+    echo -e "${RED}${PREFIX}ERROR:${RESET} REMOTE is not set. Use --remote <name> or set it in the script."
+    missing=1
+fi
+
+if [ -z "$BRANCH" ]; then
+    echo -e "${RED}${PREFIX}ERROR:${RESET} BRANCH is not set. Use --branch <branch> or set it in the script."
+    missing=1
+fi
+
+if [ -z "$URL" ]; then
+    echo -e "${RED}${PREFIX}ERROR:${RESET} URL is not set. Use --url <url> or set it in the script."
+    missing=1
+fi
+
+if [ $missing -eq 1 ]; then
+    echo -e "${YELLOW}${PREFIX}Aborting due to missing required configuration.${RESET}"
+    exit 1
+fi
+
+
+# --- Display header -------------------------------
+
+echo -e "${BLUE}${PREFIX}Syncing from ${BOLD}$REMOTE/$BRANCH${RESET} ($URL)"
+[ $DRY_RUN -eq 1 ] && echo -e "${YELLOW}${PREFIX}[DRY RUN ENABLED]${RESET}"
+[ -n "$ONLY_PATH" ] && echo -e "${BLUE}${PREFIX}Syncing only subdirectory:${RESET} $ONLY_PATH"
+
+# --- Ensure working directory is a Git repo -------------------------------
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo
+    echo -e "${YELLOW}${PREFIX}Working directory is not a Git repo. Initializing...${RESET}"
+
+    if [ $DRY_RUN -eq 0 ]; then
+        git init
+        git add .
+        git commit -m "Initial import of existing working directory"
+    else
+        echo -e "${PREFIX}[DRY RUN] Would run: git init"
+        echo -e "${PREFIX}[DRY RUN] Would run: git add ."
+        echo -e "${PREFIX}[DRY RUN] Would run: git commit -m 'Initial import of existing working directory'"
+    fi
+fi
+
+# --- Safety: dirty tree ----------------------------------------------------
+
+if [ $FORCE -eq 0 ]; then
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        echo -e "${RED}${PREFIX}ERROR:${RESET} Working tree or index has uncommitted changes."
+        echo -e "${PREFIX}Use --force to override."
+        exit 1
+    fi
+fi
+
+# --- Remote setup ----------------------------------------------------------
+
+if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
+    echo -e "${BLUE}${PREFIX}Adding remote${RESET} $REMOTE → $URL"
+    [ $DRY_RUN -eq 0 ] && git remote add "$REMOTE" "$URL"
+    echo
+fi
+
+echo -e "${BLUE}${PREFIX}Fetching...${RESET}"
+if [ $DRY_RUN -eq 0 ]; then
+    git fetch "$REMOTE"
+else
+    git fetch "$REMOTE" --dry-run
+fi
+echo
+
+REF="$REMOTE/$BRANCH"
+SHA=$(git rev-parse "$REF")
+
+# --- Upstream commit message ----------------------------------------------
+
+UPSTREAM_MSG=$(git log -1 --pretty=%B "$REF")
+COMMIT_MSG="Sync from $REMOTE/$BRANCH: $UPSTREAM_MSG"
+
+# --- Determine upstream file list -----------------------------------------
+
+if [ -n "$ONLY_PATH" ]; then
+    UPSTREAM_FILES=$(git ls-tree -r --name-only "$REF" -- "$ONLY_PATH")
+else
+    UPSTREAM_FILES=$(git ls-tree -r --name-only "$REF")
+fi
+
+# --- Untracked file collision detection -----------------------------------
+
+UNTRACKED=$(git ls-files --others --exclude-standard)
+OVERWRITTEN=()
+
+if [ -n "$UNTRACKED" ] && [ $FORCE -eq 0 ]; then
+    while IFS= read -r f; do
+        if grep -Fxq "$f" <<< "$UPSTREAM_FILES"; then
+            OVERWRITTEN+=("$f")
+        fi
+    done <<< "$UNTRACKED"
+fi
+
+if [ ${#OVERWRITTEN[@]} -gt 0 ]; then
+    echo -e "${RED}${PREFIX}ERROR:${RESET} These untracked files would be overwritten:"
+    printf ' - %s\n' "${OVERWRITTEN[@]}"
+    echo -e "${PREFIX}Use --force to override."
+    exit 1
+fi
+
+echo -e "${GREEN}${PREFIX}No untracked files will be overwritten.${RESET}"
+
+# --- Determine changed files ----------------------------------------------
+
+if [ -n "$ONLY_PATH" ]; then
+    CHANGED=$(git diff --name-status "$REF" -- "$ONLY_PATH")
+else
+    CHANGED=$(git diff --name-status "$REF")
+fi
+
+if [ -z "$CHANGED" ]; then
+    echo -e "${GREEN}${PREFIX}Already up to date. No changes.${RESET}"
+    exit 0
+fi
+
+echo -e "${BLUE}${PREFIX}Files that will be updated:${RESET}"
+echo "$CHANGED"
+
+[ $DRY_RUN -eq 1 ] && {
+    echo -e "${YELLOW}${PREFIX}[DRY RUN] Not modifying working tree.${RESET}"
+    exit 0
+}
+
+# --- Apply upstream tree ---------------------------------------------------
+
+if [ -n "$ONLY_PATH" ]; then
+    git restore --source "$REF" --worktree --staged -- "$ONLY_PATH"
+else
+    git restore --source "$REF" --worktree --staged .
+fi
+echo
+
+# --- Skip commit if nothing changed ----------------------------------------
+
+if git diff --cached --quiet; then
+    echo -e "${GREEN}${PREFIX}No changes after restore. Nothing to commit.${RESET}"
+    exit 0
+fi
+
+# --- Commit (unless --no-commit) ------------------------------------------
+
+if [ $NO_COMMIT -eq 1 ]; then
+    echo -e "${YELLOW}${PREFIX}--no-commit enabled. Changes staged but not committed.${RESET}"
+else
+    git commit -m "$COMMIT_MSG"
+    echo
+    echo -e "${GREEN}${PREFIX}Committed sync at $SHA${RESET}"
+fi
+
+# --- Mirror tags -----------------------------------------------------------
+
+TAGS=$(git tag --points-at "$SHA")
+
+if [ -n "$TAGS" ]; then
+    echo -e "${BLUE}${PREFIX}Mirroring tags:${RESET}"
+    while IFS= read -r tag; do
+        echo " - $tag"
+        git tag -f "$tag" "$SHA"
+    done <<< "$TAGS"
+    echo
+else
+    echo -e "${BLUE}${PREFIX}No tags to mirror.${RESET}"
+fi
+
+echo -e "${GREEN}${PREFIX}Sync complete.${RESET}"

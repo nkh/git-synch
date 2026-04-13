@@ -1,0 +1,102 @@
+.\" gsynch(1) — deterministic one-way Git synchronization
+.TH GSYNCH 1 "April 2026" "gsynch" "User Commands"
+
+.SH NAME
+gsynch \- deterministic one-way synchronization from a remote Git repository
+
+.SH SYNOPSIS
+.B gsynch
+[\fIOPTIONS\fR]
+
+.SH DESCRIPTION
+gsynch synchronizes the current working directory with a specific commit from
+a remote Git repository. It performs a deterministic overwrite using
+\fBgit restore --source\fR, preserving traceability and allowing clean reverts.
+
+If the directory is not a Git repository, gsynch initializes one, stages all
+existing files, and creates an initial commit. This ensures that future
+synchronizations can revert individual files cleanly.
+
+The upstream commit message is used for the local commit. Tags pointing at the
+upstream commit are mirrored locally.
+
+.SH OPTIONS
+.TP
+\fB--remote\fR <name>
+Remote name (default: r2).
+
+.TP
+\fB--branch\fR <branch>
+Branch name (default: main).
+
+.TP
+\fB--url\fR <url>
+Remote URL.
+
+.TP
+\fB--only\fR <path>
+Synchronize only a specific subdirectory.
+
+.TP
+\fB--dry-run\fR
+Preview all changes without modifying anything.
+
+.TP
+\fB--force\fR
+Override safety checks.
+
+.TP
+\fB--no-commit\fR
+Apply changes but do not commit.
+
+.TP
+\fB-h\fR, \fB--help\fR
+Show help.
+
+.SH SAFETY
+gsynch refuses to run if the working tree or index contains uncommitted
+changes, or if untracked files would be overwritten. Use \fB--force\fR to
+override.
+
+.SH EXAMPLES
+
+.SS Basic sync
+Synchronize using default remote, branch, and URL:
+
+    gsynch
+
+.SS Sync from a specific remote and branch
+    gsynch --remote upstream --branch dev --url https://github.com/example/project
+
+.SS Sync only a subdirectory
+    gsynch --only src/lib
+
+Restores only files under \fIsrc/lib\fR from the upstream commit.
+
+.SS Preview changes (dry run)
+    gsynch --dry-run
+
+Shows which files would change, which untracked files would be overwritten,
+which tags would be mirrored, and whether a commit would be created.
+
+.SS Apply changes without committing
+    gsynch --no-commit
+
+Useful for inspection or combining multiple syncs into one commit.
+
+.SS Override all safety checks
+    gsynch --force
+
+Bypasses dirty-tree protection and untracked-file collision detection.
+
+.SH INTENDED USE
+gsynch is ideal for mirroring template repositories, synchronizing vendor or
+third-party code, maintaining reproducible snapshots of external sources, and
+keeping local directories aligned with upstream commits. It is intentionally
+one-directional and never pushes or merges.
+
+.SH AUTHOR
+Written by nadim.
+
+.SH SEE ALSO
+git(1)
