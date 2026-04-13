@@ -1,0 +1,37 @@
+actor User
+participant "gsynch" as G
+participant "Upstream Repo" as U
+participant "Local Repo" as L
+
+User -> G : run gsynch
+
+G -> G : validate required options
+
+G -> L : ensure repo exists\n(init if needed)
+L --> G : repo ready
+
+G -> U : fetch upstream branch
+U --> G : fetch complete
+
+G -> L : detect forced push
+L --> G : forced-push info
+
+G -> L : scan working tree\n(staged, modified, untracked)
+L --> G : working-tree state
+
+G -> G : apply safety rules\n(block or allow)
+
+G -> U : request upstream tree
+U --> G : upstream tree
+
+G -> L : restore files\n(full or subtree)
+
+G -> L : stage restored files
+
+G -> L : create commit\n"gsynch: sync ..."
+
+G -> L : remove remote\n(read-only mode)
+
+G -> User : report summary
+G --> User : sync complete
+

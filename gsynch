@@ -7,82 +7,131 @@ RED="\033[31m" GREEN="\033[32m" YELLOW="\033[33m" BLUE="\033[34m" BOLD="\033[1m"
 # Prefix for all output
 PREFIX="gsynch: "
 
-# Default values
-REMOTE="" BRANCH="" URL=""
+# Defaults (can be overridden by env and CLI)
+BRANCH="main"
+URL=""
 
 ONLY_PATH=""
 DRY_RUN=0
-FORCE=0
 NO_COMMIT=0
 
-show_help() {
-    echo -e "
+OVERRIDE_STAGED=0
+OVERRIDE_MODIFIED=0
+OVERRIDE_UNTRACKED=0
+OVERRIDE_ALL=0
+ALLOW_FORCED_PUSH=0
+
+show_help()
+{
+echo -e "
 ${BOLD}gsynch - synchs current directory with a git repository${RESET}
 
 Usage:
   gsynch [options]
 
 Options:
-  --remote <name>       Remote name (default: r2)
-  --branch <branch>     Branch name (default: main)
-  --url <url>           Remote URL
-  --only <path>         Sync only a subdirectory
-  --dry-run             Show what would happen without modifying anything
-  --force               Override safety checks
-  --no-commit           Apply changes but do not commit
-  -h, --help            Show this help message
+  --branch <branch>           Branch name (default: main)
+  --url <url>                 Remote URL
+  --only <path>               Sync only a subdirectory
+  --dry-run                   Show what would happen without modifying anything
+  --no-commit                 Apply changes but do not commit
+
+  --override-staged           Allow overwriting staged changes
+  --override-modified         Allow overwriting modified tracked files
+  --override-untracked        Allow overwriting untracked files
+  --override-all              Allow overwriting all local changes (equivalent to all overrides)
+
+  --allow-forced-push         Allow synchronization to continue even if a forced push is detected
+
+  -h, --help                  Show this help message
 "
 }
 
-# Parse arguments
+# --- Load from environment ---------------------------------------------------
+
+[ -n "${GSYNCH_URL:-}" ]    && URL="$GSYNCH_URL"
+[ -n "${GSYNCH_BRANCH:-}" ] && BRANCH="$GSYNCH_BRANCH"
+
+# --- Handle options ----------------------------------------------------------
+
 while [ $# -gt 0 ]; do
     case "$1" in
-        --remote)    REMOTE="$2";    shift 2 ;;
-        --branch)    BRANCH="$2";    shift 2 ;;
-        --url)       URL="$2";       shift 2 ;;
-        --only)      ONLY_PATH="$2"; shift 2 ;;
-        --dry-run)   DRY_RUN=1;      shift ;;
-        --force)     FORCE=1;        shift ;;
-        --no-commit) NO_COMMIT=1;    shift ;;
+        --branch)             BRANCH="$2";            shift 2 ;;
+        --url)                URL="$2";               shift 2 ;;
+        --only)               ONLY_PATH="$2";         shift 2 ;;
+        --dry-run)            DRY_RUN=1;              shift ;;
+        --no-commit)          NO_COMMIT=1;            shift ;;
 
-        -h|--help)   show_help;      exit 0 ;;
+        --override-staged)    OVERRIDE_STAGED=1;      shift ;;
+        --override-modified)  OVERRIDE_MODIFIED=1;    shift ;;
+        --override-untracked) OVERRIDE_UNTRACKED=1;   shift ;;
+        --override-all)       OVERRIDE_ALL=1;         shift ;;
+
+        --allow-forced-push)  ALLOW_FORCED_PUSH=1;    shift ;;
+
+        -h|--help)            show_help;              exit 0 ;;
 
         *) echo -e "${RED}${PREFIX}Unknown argument:${RESET} $1"; exit 1 ;;
     esac
 done
 
-# --- Required variables ------------------------------------------------------
-
-local missing=0
-
-if [ -z "$REMOTE" ]; then
-    echo -e "${RED}${PREFIX}ERROR:${RESET} REMOTE is not set. Use --remote <name> or set it in the script."
-    missing=1
+if [ $OVERRIDE_ALL -eq 1 ]; then
+    OVERRIDE_STAGED=1
+    OVERRIDE_MODIFIED=1
+    OVERRIDE_UNTRACKED=1
 fi
 
+# --- Required variables ------------------------------------------------------
+
+missing=0
+
 if [ -z "$BRANCH" ]; then
-    echo -e "${RED}${PREFIX}ERROR:${RESET} BRANCH is not set. Use --branch <branch> or set it in the script."
+    echo -e "${RED}${PREFIX}ERROR:${RESET} BRANCH is not set. Use --branch <branch> or GSYNCH_BRANCH."
     missing=1
 fi
 
 if [ -z "$URL" ]; then
-    echo -e "${RED}${PREFIX}ERROR:${RESET} URL is not set. Use --url <url> or set it in the script."
+    echo -e "${RED}${PREFIX}ERROR:${RESET} URL is not set. Use --url <url> or GSYNCH_URL."
     missing=1
 fi
+
+sanitize() { echo "$1" | sed 's/[^A-Za-z0-9_-]/_/g' ; }
+
+REMOTE="$(sanitize "${URL}_${BRANCH}")"
 
 if [ $missing -eq 1 ]; then
     echo -e "${YELLOW}${PREFIX}Aborting due to missing required configuration.${RESET}"
     exit 1
 fi
 
+# --- Detect empty directory --------------------------------------------------
 
-# --- Display header -------------------------------
+shopt -s nullglob dotglob
+files=(*)
+shopt -u nullglob dotglob
+
+if [ ${#files[@]} -eq 0 ]; then
+    echo -e "${BLUE}${PREFIX}Directory is empty. Cloning upstream...${RESET}"
+
+    if [ $DRY_RUN -eq 0 ]; then
+        git clone --branch "$BRANCH" "$URL" .
+        git remote remove origin || true
+    else
+        echo -e "${PREFIX}[DRY RUN] Would run: git clone --branch $BRANCH $URL ."
+        echo -e "${PREFIX}[DRY RUN] Would run: git remote remove origin"
+    fi
+
+    echo -e "${GREEN}${PREFIX}Initial clone complete.${RESET}"
+    exit 0
+fi
+
+# --- Display header ----------------------------------------------------------
 
 echo -e "${BLUE}${PREFIX}Syncing from ${BOLD}$REMOTE/$BRANCH${RESET} ($URL)"
 [ $DRY_RUN -eq 1 ] && echo -e "${YELLOW}${PREFIX}[DRY RUN ENABLED]${RESET}"
 [ -n "$ONLY_PATH" ] && echo -e "${BLUE}${PREFIX}Syncing only subdirectory:${RESET} $ONLY_PATH"
 
-# --- Ensure working directory is a Git repo -------------------------------
+# --- Ensure working directory is a Git repo ----------------------------------
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo
@@ -99,25 +148,22 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fi
 fi
 
-# --- Safety: dirty tree ----------------------------------------------------
+# --- Remote setup ------------------------------------------------------------
 
-if [ $FORCE -eq 0 ]; then
-    if ! git diff --quiet || ! git diff --cached --quiet; then
-        echo -e "${RED}${PREFIX}ERROR:${RESET} Working tree or index has uncommitted changes."
-        echo -e "${PREFIX}Use --force to override."
-        exit 1
-    fi
-fi
-
-# --- Remote setup ----------------------------------------------------------
-
-if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
+if git remote get-url "$REMOTE" >/dev/null 2>&1; then
+    echo -e "${BLUE}${PREFIX}Updating remote URL${RESET} $REMOTE → $URL"
+    [ $DRY_RUN -eq 0 ] && git remote set-url "$REMOTE" "$URL"
+else
     echo -e "${BLUE}${PREFIX}Adding remote${RESET} $REMOTE → $URL"
     [ $DRY_RUN -eq 0 ] && git remote add "$REMOTE" "$URL"
-    echo
 fi
+echo
 
-echo -e "${BLUE}${PREFIX}Fetching...${RESET}"
+# --- Fetch and detect forced push -------------------------------------------
+
+OLD_SHA=$(git rev-parse "$REMOTE/$BRANCH" 2>/dev/null || echo "")
+
+echo -e "${BLUE}${PREFIX}Fetching ${REMOTE} (url: ${URL}, branch: ${BRANCH})...${RESET}"
 if [ $DRY_RUN -eq 0 ]; then
     git fetch "$REMOTE"
 else
@@ -125,15 +171,32 @@ else
 fi
 echo
 
+NEW_SHA=$(git rev-parse "$REMOTE/$BRANCH")
+
+if [ -n "$OLD_SHA" ] && [ "$OLD_SHA" != "$NEW_SHA" ]; then
+    if git merge-base --is-ancestor "$OLD_SHA" "$NEW_SHA"; then
+        :
+    else
+        echo -e "${YELLOW}${PREFIX}WARNING:${RESET} Upstream branch appears to have been force-pushed."
+        echo -e "${YELLOW}${PREFIX}Your local history would be overwritten by this sync.${RESET}"
+        if [ $ALLOW_FORCED_PUSH -eq 0 ]; then
+            echo -e "${RED}${PREFIX}Aborting due to forced push. Use --allow-forced-push to proceed.${RESET}"
+            exit 1
+        else
+            echo -e "${YELLOW}${PREFIX}--allow-forced-push set. Continuing despite forced push.${RESET}"
+        fi
+    fi
+fi
+
 REF="$REMOTE/$BRANCH"
 SHA=$(git rev-parse "$REF")
 
-# --- Upstream commit message ----------------------------------------------
+# --- Upstream commit message -------------------------------------------------
 
 UPSTREAM_MSG=$(git log -1 --pretty=%B "$REF")
 COMMIT_MSG="Sync from $REMOTE/$BRANCH: $UPSTREAM_MSG"
 
-# --- Determine upstream file list -----------------------------------------
+# --- Determine upstream file list -------------------------------------------
 
 if [ -n "$ONLY_PATH" ]; then
     UPSTREAM_FILES=$(git ls-tree -r --name-only "$REF" -- "$ONLY_PATH")
@@ -141,34 +204,60 @@ else
     UPSTREAM_FILES=$(git ls-tree -r --name-only "$REF")
 fi
 
-# --- Untracked file collision detection -----------------------------------
+# --- Local state classification ----------------------------------------------
 
-UNTRACKED=$(git ls-files --others --exclude-standard)
-OVERWRITTEN=()
+STAGED_FILES=$(git diff --cached --name-only)
+MODIFIED_FILES=$(git diff --name-only)
+UNTRACKED_FILES=$(git ls-files --others --exclude-standard)
 
-if [ -n "$UNTRACKED" ] && [ $FORCE -eq 0 ]; then
-    while IFS= read -r f; do
-        if grep -Fxq "$f" <<< "$UPSTREAM_FILES"; then
-            OVERWRITTEN+=("$f")
-        fi
-    done <<< "$UNTRACKED"
+ANY_OVERRIDE=0
+if [ $OVERRIDE_STAGED -eq 1 ] || [ $OVERRIDE_MODIFIED -eq 1 ] || [ $OVERRIDE_UNTRACKED -eq 1 ]; then
+    ANY_OVERRIDE=1
 fi
 
-if [ ${#OVERWRITTEN[@]} -gt 0 ]; then
-    echo -e "${RED}${PREFIX}ERROR:${RESET} These untracked files would be overwritten:"
-    printf ' - %s\n' "${OVERWRITTEN[@]}"
-    echo -e "${PREFIX}Use --force to override."
-    exit 1
+# --- Blocking semantics when no overrides -----------------------------------
+
+if [ $ANY_OVERRIDE -eq 0 ]; then
+    if [ -n "$STAGED_FILES" ] || [ -n "$MODIFIED_FILES" ]; then
+        echo -e "${RED}${PREFIX}ERROR:${RESET} Working tree or index has uncommitted changes."
+        git status --short
+        echo -e "${RED}${PREFIX}Use --override-staged/--override-modified/--override-all to override.${RESET}"
+        exit 1
+    fi
+
+    OVERWRITTEN=()
+    if [ -n "$UNTRACKED_FILES" ]; then
+        while IFS= read -r f; do
+            if grep -Fxq "$f" <<< "$UPSTREAM_FILES"; then
+                OVERWRITTEN+=("$f")
+            fi
+        done <<< "$UNTRACKED_FILES"
+    fi
+
+    if [ ${#OVERWRITTEN[@]} -gt 0 ]; then
+        echo -e "${RED}${PREFIX}ERROR:${RESET} These untracked files would be overwritten:"
+        printf ' - %s\n' "${OVERWRITTEN[@]}"
+        echo -e "${PREFIX}Use --override-untracked or --override-all to override."
+        exit 1
+    fi
 fi
 
-echo -e "${GREEN}${PREFIX}No untracked files will be overwritten.${RESET}"
+echo -e "${GREEN}${PREFIX}Local state acceptable for sync.${RESET}"
 
-# --- Determine changed files ----------------------------------------------
+# --- Determine changed files -------------------------------------------------
 
-if [ -n "$ONLY_PATH" ]; then
-    CHANGED=$(git diff --name-status "$REF" -- "$ONLY_PATH")
+if git rev-parse HEAD >/dev/null 2>&1; then
+    if [ -n "$ONLY_PATH" ]; then
+        CHANGED=$(git diff --name-status HEAD.."$REF" -- "$ONLY_PATH")
+    else
+        CHANGED=$(git diff --name-status HEAD.."$REF")
+    fi
 else
-    CHANGED=$(git diff --name-status "$REF")
+    if [ -n "$ONLY_PATH" ]; then
+        CHANGED=$(git diff --name-status "$REF" -- "$ONLY_PATH" || true)
+    else
+        CHANGED=$(git diff --name-status "$REF" || true)
+    fi
 fi
 
 if [ -z "$CHANGED" ]; then
@@ -184,23 +273,58 @@ echo "$CHANGED"
     exit 0
 }
 
-# --- Apply upstream tree ---------------------------------------------------
+# --- Selective apply of upstream tree ---------------------------------------
 
-if [ -n "$ONLY_PATH" ]; then
-    git restore --source "$REF" --worktree --staged -- "$ONLY_PATH"
-else
-    git restore --source "$REF" --worktree --staged .
-fi
+echo -e "${BLUE}${PREFIX}Applying upstream tree with override semantics...${RESET}"
+
+for f in $UPSTREAM_FILES; do
+    is_tracked=0
+    is_staged=0
+    is_modified=0
+    is_untracked=0
+
+    if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+        is_tracked=1
+        if git diff --cached --name-only -- "$f" | grep -q .; then
+            is_staged=1
+        fi
+        if git diff --name-only -- "$f" | grep -q .; then
+            is_modified=1
+        fi
+    else
+        if [ -e "$f" ]; then
+            is_untracked=1
+        fi
+    fi
+
+    if [ $ANY_OVERRIDE -eq 1 ]; then
+        if [ $is_staged -eq 1 ] && [ $OVERRIDE_STAGED -eq 0 ]; then
+            echo -e "${YELLOW}${PREFIX}Preserving staged file:${RESET} $f"
+            continue
+        fi
+        if [ $is_modified -eq 1 ] && [ $OVERRIDE_MODIFIED -eq 0 ]; then
+            echo -e "${YELLOW}${PREFIX}Preserving modified file:${RESET} $f"
+            continue
+        fi
+        if [ $is_untracked -eq 1 ] && [ $OVERRIDE_UNTRACKED -eq 0 ]; then
+            echo -e "${YELLOW}${PREFIX}Preserving untracked file:${RESET} $f"
+            continue
+        fi
+    fi
+
+    echo -e "${BLUE}${PREFIX}Restoring:${RESET} $f"
+    git restore --source "$REF" --worktree --staged -- "$f"
+done
 echo
 
-# --- Skip commit if nothing changed ----------------------------------------
+# --- Skip commit if nothing changed -----------------------------------------
 
 if git diff --cached --quiet; then
     echo -e "${GREEN}${PREFIX}No changes after restore. Nothing to commit.${RESET}"
     exit 0
 fi
 
-# --- Commit (unless --no-commit) ------------------------------------------
+# --- Commit (unless --no-commit) --------------------------------------------
 
 if [ $NO_COMMIT -eq 1 ]; then
     echo -e "${YELLOW}${PREFIX}--no-commit enabled. Changes staged but not committed.${RESET}"
@@ -210,7 +334,7 @@ else
     echo -e "${GREEN}${PREFIX}Committed sync at $SHA${RESET}"
 fi
 
-# --- Mirror tags -----------------------------------------------------------
+# --- Mirror tags -------------------------------------------------------------
 
 TAGS=$(git tag --points-at "$SHA")
 

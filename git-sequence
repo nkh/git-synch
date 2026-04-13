@@ -1,0 +1,66 @@
+actor User
+participant "gsynch" as G
+participant "Upstream Repo" as U
+participant "Local Repo\n(Working Tree + Index + HEAD)" as L
+
+User -> G : run gsynch
+
+
+
+
+G -> U : git fetch <url> <branch>
+U --> G : upstream commit + tree
+
+
+
+
+G -> L : git ls-files -s\n(index state)
+L --> G : staged entries
+
+G -> L : git ls-files -m\n(modified files)
+L --> G : modified entries
+
+G -> L : git ls-files -o --exclude-standard\n(untracked files)
+L --> G : untracked entries
+
+G -> G : apply safety rules\n(block or allow)
+
+
+
+
+G -> L : git read-tree --reset <upstream-tree>\n(or --prefix for subtree)
+L --> G : index updated to upstream tree
+
+
+
+
+G -> L : git checkout-index -a\n(materialize index into working tree)
+L --> G : working tree updated
+
+
+
+
+G -> L : git write-tree
+L --> G : <new-tree-id>
+
+
+
+
+G -> L : git commit-tree <new-tree-id>\n-p <old-head>\n"gsynch: sync ..."
+L --> G : <new-commit-id>
+
+
+
+
+G -> L : git update-ref refs/heads/<branch> <new-commit-id>
+
+
+
+
+G -> L : git remote remove origin
+
+
+
+
+G -> User : sync complete
+

@@ -1,102 +1,230 @@
-.\" gsynch(1) — deterministic one-way Git synchronization
 .TH GSYNCH 1 "April 2026" "gsynch" "User Commands"
-
 .SH NAME
 gsynch \- deterministic one-way synchronization from a remote Git repository
-
 .SH SYNOPSIS
 .B gsynch
-[\fIOPTIONS\fR]
+[\fIoptions\fR]
 
 .SH DESCRIPTION
-gsynch synchronizes the current working directory with a specific commit from
-a remote Git repository. It performs a deterministic overwrite using
-\fBgit restore --source\fR, preserving traceability and allowing clean reverts.
+\fBgsynch\fR synchronizes the contents of a remote Git repository and branch
+into the current working directory using Git's tree-restore mechanisms. It is
+designed for deterministic, reproducible workflows where the remote repository
+acts as the authoritative source of truth.
 
-If the directory is not a Git repository, gsynch initializes one, stages all
-existing files, and creates an initial commit. This ensures that future
-synchronizations can revert individual files cleanly.
+The tool performs a one-way mirror of the upstream tree into the local working
+directory. Local changes are protected by default and require explicit override
+flags to be overwritten.
 
-The upstream commit message is used for the local commit. Tags pointing at the
-upstream commit are mirrored locally.
+If the current directory is empty, \fBgsynch\fR performs a clone of the
+configured branch into \fB.\fR and removes the \fIorigin\fR remote to prevent
+accidental pushes.
+
+If the directory is not a Git repository, \fBgsynch\fR initializes one and
+creates an initial commit from the existing contents to provide a baseline for
+diffs and restores.
 
 .SH OPTIONS
-.TP
-\fB--remote\fR <name>
-Remote name (default: r2).
 
 .TP
-\fB--branch\fR <branch>
-Branch name (default: main).
+.BR --branch " " \fIBRANCH\fR
+Branch name to synchronize from. Default: \fImain\fR.
 
 .TP
-\fB--url\fR <url>
-Remote URL.
+.BR --url " " \fIURL\fR
+Remote URL of the upstream repository. Required unless provided via
+\fBGSYNCH_URL\fR.
 
 .TP
-\fB--only\fR <path>
-Synchronize only a specific subdirectory.
+.BR --only " " \fIPATH\fR
+Restrict synchronization to a subdirectory of the upstream tree. Only files
+under the specified path will be restored.
 
 .TP
-\fB--dry-run\fR
-Preview all changes without modifying anything.
+.BR --dry-run
+Show what would happen without modifying the working tree or index. No files
+are restored, no commits are created, and no stashes are made.
 
 .TP
-\fB--force\fR
-Override safety checks.
+.BR --no-commit
+Apply changes and stage them, but do not create a commit. Useful for inspection
+or integration into larger workflows.
+
+.SS Override Options
+\fBgsynch\fR classifies local state into three classes: staged, modified, and
+untracked. By default, any local changes in these classes cause synchronization
+to abort.
+
+The following options allow selective overriding of this protection:
 
 .TP
-\fB--no-commit\fR
-Apply changes but do not commit.
+.BR --override-staged
+Allow overwriting staged changes. Without this flag, the presence of staged
+changes causes \fBgsynch\fR to abort.
 
 .TP
-\fB-h\fR, \fB--help\fR
-Show help.
+.BR --override-modified
+Allow overwriting modified tracked files in the working tree.
 
-.SH SAFETY
-gsynch refuses to run if the working tree or index contains uncommitted
-changes, or if untracked files would be overwritten. Use \fB--force\fR to
-override.
+.TP
+.BR --override-untracked
+Allow overwriting untracked files whose paths collide with files in the
+upstream tree.
 
-.SH EXAMPLES
+.TP
+.BR --override-all
+Equivalent to \fB--override-staged\fR, \fB--override-modified\fR, and
+\fB--override-untracked\fR. Allows all local changes and colliding untracked
+files to be overwritten.
 
-.SS Basic sync
-Synchronize using default remote, branch, and URL:
+.SS Forced Push Handling
 
-    gsynch
+.TP
+.BR --allow-forced-push
+Allow synchronization to continue even if a forced push is detected on the
+upstream branch.
 
-.SS Sync from a specific remote and branch
-    gsynch --remote upstream --branch dev --url https://github.com/example/project
+By default, \fBgsynch\fR aborts when a forced push is detected to avoid
+silently rewriting local history. This option makes the destructive nature of
+continuing explicit.
 
-.SS Sync only a subdirectory
-    gsynch --only src/lib
+.SS Help
 
-Restores only files under \fIsrc/lib\fR from the upstream commit.
+.TP
+.BR -h ", " --help
+Show a brief help message and exit.
 
-.SS Preview changes (dry run)
-    gsynch --dry-run
+.SH BEHAVIOR
 
-Shows which files would change, which untracked files would be overwritten,
-which tags would be mirrored, and whether a commit would be created.
+.SS Empty Directory
+If the current directory contains no files, \fBgsynch\fR performs:
 
-.SS Apply changes without committing
-    gsynch --no-commit
+.nf
+git clone --branch BRANCH URL .
+git remote remove origin
+.fi
 
-Useful for inspection or combining multiple syncs into one commit.
+and exits. This bootstraps the working tree without leaving a push-capable
+\fIorigin\fR remote.
 
-.SS Override all safety checks
-    gsynch --force
+.SS Non-Git Directory
+If the directory is not a Git repository, \fBgsynch\fR runs:
 
-Bypasses dirty-tree protection and untracked-file collision detection.
+.nf
+git init
+git add .
+git commit -m "Initial import of existing working directory"
+.fi
 
-.SH INTENDED USE
-gsynch is ideal for mirroring template repositories, synchronizing vendor or
-third-party code, maintaining reproducible snapshots of external sources, and
-keeping local directories aligned with upstream commits. It is intentionally
-one-directional and never pushes or merges.
+to create a baseline commit for deterministic diffs and restores.
 
-.SH AUTHOR
-Written by nadim.
+.SS Local Change Classification
+\fBgsynch\fR classifies local state into:
+
+.IP 
+
+\fIStaged\fR: tracked files with changes in the index.
+
+.IP 
+
+\fIModified\fR: tracked files with changes in the working tree.
+
+.IP 
+
+\fIUntracked\fR: files not tracked by Git.
+
+.SS Default Blocking Behavior
+Without override flags:
+
+.IP 
+
+Any staged or modified files cause \fBgsynch\fR to abort.
+
+.IP 
+
+Untracked files that would be overwritten by incoming files cause
+\fBgsynch\fR to abort.
+
+.SS Override Semantics
+If any override flag is provided:
+
+.IP 
+
+Classes with an override are overwritten.
+
+.IP 
+
+Classes without an override are preserved (skipped during restore).
+
+This allows fine-grained control over destructive behavior.
+
+.SS Forced Push Detection
+After fetching, \fBgsynch\fR compares the previous and new upstream commit.
+If the previous commit is not an ancestor of the new commit, a forced push is
+detected.
+
+Default behavior:
+
+.IP 
+
+Print a warning and abort.
+
+With \fB--allow-forced-push\fR:
+
+.IP 
+
+Continue despite the forced push.
+
+.SS Subdirectory Synchronization
+Use:
+
+.nf
+gsynch --only path/to/subdir
+.fi
+
+to restrict synchronization to a subtree of the upstream repository.
+
+.SS Dry Run Mode
+Use:
+
+.nf
+gsynch --dry-run
+.fi
+
+to preview all changes without modifying the working tree or index.
+
+.SS No Commit Mode
+Use:
+
+.nf
+gsynch --no-commit
+.fi
+
+to stage changes without committing them.
+
+.SH ENVIRONMENT
+
+.TP
+.B GSYNCH_URL
+Default URL for the upstream repository.
+
+.TP
+.B GSYNCH_BRANCH
+Default branch name for synchronization.
+
+.SH EXIT STATUS
+
+.TP
+0
+Synchronization completed successfully or no changes were necessary.
+
+.TP
+>0
+An error occurred, or local state prevented synchronization under the current
+override and forced-push settings.
 
 .SH SEE ALSO
 git(1)
+
+.SH AUTHOR
+Written by Nadim.
+
