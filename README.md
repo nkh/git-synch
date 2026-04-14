@@ -4,7 +4,7 @@
 
 Unlike `git pull`, `gsynch` never merges, never rebases, and never rewrites your history. It performs a controlled, auditable update from a remote source of truth.
 
----
+![Sequence](https://github.com/nkh/git-synch/blob/main/sequence.png)
 
 ## Why gsynch?
 

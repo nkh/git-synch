@@ -258,7 +258,7 @@ G --> User : sync complete
         │────────────────────⮞│                            │                          │
         │                     │validate required options-+ │                          │
         │                     <--------------------------+ │                          │
-        │                     │         ensure repo exists\n(init if needed)          │
+        │                     │         ensure repo exists  (init if needed)          │
         │                     │──────────────────────────────────────────────────────⮞│
         │                     │                      repo ready                       │
         │                     │⮜─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌│
@@ -270,23 +270,23 @@ G --> User : sync complete
         │                     │──────────────────────────────────────────────────────⮞│
         │                     │                   forced-push info                    │
         │                     │⮜─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌│
-        │                     │   scan working tree\n(staged, modified, untracked)    │
+        │                     │   scan working tree  (staged, modified, untracked)    │
         │                     │──────────────────────────────────────────────────────⮞│
         │                     │                  working-tree state                   │
         │                     │⮜─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌│
-        │                     │apply safety rules\n(block or allow)-+                 │
+        │                     │apply safety rules  (block or allow)-+                 │
         │                     <-------------------------------------+                 │
         │                     │   request upstream tree    │                          │
         │                     │───────────────────────────⮞│                          │
         │                     │       upstream tree        │                          │
         │                     │⮜─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─╌─│                          │
-        │                     │           restore files\n(full or subtree)            │
+        │                     │           restore files  (full or subtree)            │
         │                     │──────────────────────────────────────────────────────⮞│
         │                     │                 stage restored files                  │
         │                     │──────────────────────────────────────────────────────⮞│
-        │                     │          create commit\n"gsynch: sync ..."            │
+        │                     │          create commit  "gsynch: sync ..."            │
         │                     │──────────────────────────────────────────────────────⮞│
-        │                     │           remove remote\n(read-only mode)             │
+        │                     │           remove remote  (read-only mode)             │
         │                     │──────────────────────────────────────────────────────⮞│
         │   report summary    │                            │                          │
         │⮜────────────────────│                            │                          │

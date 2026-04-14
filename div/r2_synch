@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+R2_BRANCH="${1:-main}"
+
+R2_REMOTE_NAME="r2" # local name for the remote, can be anything
+R2_REMOTE_URL="https://github.com/user_id/repo"   # change this
+
+echo "Syncing from r2 branch: $R2_BRANCH"
+
+# Ensure remote exists
+if ! git remote get-url "$R2_REMOTE_NAME" >/dev/null 2>&1; then
+    git remote add "$R2_REMOTE_NAME" "$R2_REMOTE_URL"
+fi
+
+git fetch "$R2_REMOTE_NAME"
+
+R2_REF="$R2_REMOTE_NAME/$R2_BRANCH"
+R2_SHA=$(git rev-parse "$R2_REF")
+
+# Extract commit message from source repo
+UPSTREAM_MSG=$(git log -1 --pretty=%B "$R2_REF")
+
+# Optional: prefix (remove if you want exact message only)
+COMMIT_MSG="R2 sync: $UPSTREAM_MSG"
+
+echo "Using commit message:"
+echo "---------------------"
+echo "$COMMIT_MSG"
+echo "---------------------"
+
+# Overwrite working tree + index
+git restore --source "$R2_REF" --worktree --staged .
+
+# Commit with multi-line message
+git commit -m "$COMMIT_MSG"

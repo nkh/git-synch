@@ -14,12 +14,17 @@ URL=""
 ONLY_PATH=""
 DRY_RUN=0
 NO_COMMIT=0
+DEBUG=0
 
 OVERRIDE_STAGED=0
 OVERRIDE_MODIFIED=0
 OVERRIDE_UNTRACKED=0
 OVERRIDE_ALL=0
 ALLOW_FORCED_PUSH=0
+
+prefix() { local prefix="$1" ; shift ; "$@" > >(sed 's/^/'$prefix' /') 2> >(sed 's/^/'${prefix}'ᵉ /' >&2)  ; }
+#
+# time unbuffer bash -ic 'ls -l'   > >(sed 's/^/[OUT] /')   2> >(sed 's/^/[ERR] /' >&2)
 
 show_help()
 {
@@ -43,6 +48,7 @@ Options:
 
   --allow-forced-push         Allow synchronization to continue even if a forced push is detected
 
+  --debug                     Show debug information
   -h, --help                  Show this help message
 "
 }
@@ -61,7 +67,8 @@ while [ $# -gt 0 ]; do
         --only)               ONLY_PATH="$2";         shift 2 ;;
         --dry-run)            DRY_RUN=1;              shift ;;
         --no-commit)          NO_COMMIT=1;            shift ;;
-
+        --debug)              DEBUG=1;                shift ;;
+ 
         --override-staged)    OVERRIDE_STAGED=1;      shift ;;
         --override-modified)  OVERRIDE_MODIFIED=1;    shift ;;
         --override-untracked) OVERRIDE_UNTRACKED=1;   shift ;;
@@ -97,7 +104,7 @@ fi
 
 sanitize() { echo "$1" | sed 's/[^A-Za-z0-9_-]/_/g' ; }
 
-REMOTE="$(sanitize "${URL}_${BRANCH}")"
+REMOTE="$(sanitize "${URL}")"
 
 if [ $missing -eq 1 ]; then
     echo -e "${YELLOW}${PREFIX}Aborting due to missing required configuration.${RESET}"
@@ -127,20 +134,21 @@ fi
 
 # --- Display header ----------------------------------------------------------
 
-echo -e "${BLUE}${PREFIX}Syncing from ${BOLD}$REMOTE/$BRANCH${RESET} ($URL)"
+echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$URL:$BRANCH${RESET}"
+
 [ $DRY_RUN -eq 1 ] && echo -e "${YELLOW}${PREFIX}[DRY RUN ENABLED]${RESET}"
+
 [ -n "$ONLY_PATH" ] && echo -e "${BLUE}${PREFIX}Syncing only subdirectory:${RESET} $ONLY_PATH"
 
 # --- Ensure working directory is a Git repo ----------------------------------
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo
     echo -e "${YELLOW}${PREFIX}Working directory is not a Git repo. Initializing...${RESET}"
 
     if [ $DRY_RUN -eq 0 ]; then
-        git init
-        git add .
-        git commit -m "Initial import of existing working directory"
+        git init &>/dev/null
+        git add . &>/dev/null
+        git commit -m "Initial import of existing working directory" &>/dev/null
     else
         echo -e "${PREFIX}[DRY RUN] Would run: git init"
         echo -e "${PREFIX}[DRY RUN] Would run: git add ."
@@ -151,34 +159,46 @@ fi
 # --- Remote setup ------------------------------------------------------------
 
 if git remote get-url "$REMOTE" >/dev/null 2>&1; then
-    echo -e "${BLUE}${PREFIX}Updating remote URL${RESET} $REMOTE → $URL"
+	# echo -e "${BLUE}${PREFIX}Updating remote URL ${BOLD}$REMOTE ($URL)${RESET}"
     [ $DRY_RUN -eq 0 ] && git remote set-url "$REMOTE" "$URL"
 else
-    echo -e "${BLUE}${PREFIX}Adding remote${RESET} $REMOTE → $URL"
+	# echo -e "${BLUE}${PREFIX}Adding remote ${BOLD}$REMOTE ($URL)${RESET} "
     [ $DRY_RUN -eq 0 ] && git remote add "$REMOTE" "$URL"
 fi
-echo
 
 # --- Fetch and detect forced push -------------------------------------------
 
-OLD_SHA=$(git rev-parse "$REMOTE/$BRANCH" 2>/dev/null || echo "")
+OLD_SHA=$(git rev-parse --short=7 "$REMOTE/$BRANCH" 2>/dev/null || echo "")
 
-echo -e "${BLUE}${PREFIX}Fetching ${REMOTE} (url: ${URL}, branch: ${BRANCH})...${RESET}"
+# echo -e "${BLUE}${PREFIX}Fetching ${BOLD}${REMOTE} (url: ${URL}, branch: ${BRANCH})...${RESET}"
 if [ $DRY_RUN -eq 0 ]; then
-    git fetch "$REMOTE"
+    git fetch "$REMOTE" &>/dev/null
 else
     git fetch "$REMOTE" --dry-run
 fi
-echo
 
-NEW_SHA=$(git rev-parse "$REMOTE/$BRANCH")
+NEW_SHA=$(git rev-parse --short=7 "$REMOTE/$BRANCH")
+
+[ $DEBUG -eq 1 ] &&
+    {
+    echo local:
+    git log --oneline --graph --decorate
+
+    echo remote:
+    git log "$REMOTE/$BRANCH" --oneline --graph --decorate
+
+    echo check with: git merge-base --is-ancestor "$OLD_SHA" "$NEW_SHA"
+    }
 
 if [ -n "$OLD_SHA" ] && [ "$OLD_SHA" != "$NEW_SHA" ]; then
+
+    # echo -e "${BLUE}${PREFIX}Checking for forced push...${RESET}"
+
     if git merge-base --is-ancestor "$OLD_SHA" "$NEW_SHA"; then
         :
     else
-        echo -e "${YELLOW}${PREFIX}WARNING:${RESET} Upstream branch appears to have been force-pushed."
-        echo -e "${YELLOW}${PREFIX}Your local history would be overwritten by this sync.${RESET}"
+        echo -e "${YELLOW}${PREFIX}Upstream branch is force-pushed; sync would override history.${RESET}"
+
         if [ $ALLOW_FORCED_PUSH -eq 0 ]; then
             echo -e "${RED}${PREFIX}Aborting due to forced push. Use --allow-forced-push to proceed.${RESET}"
             exit 1
@@ -189,12 +209,14 @@ if [ -n "$OLD_SHA" ] && [ "$OLD_SHA" != "$NEW_SHA" ]; then
 fi
 
 REF="$REMOTE/$BRANCH"
-SHA=$(git rev-parse "$REF")
+SHA_remote=$(git rev-parse --short=7 "$REF")
 
 # --- Upstream commit message -------------------------------------------------
 
-UPSTREAM_MSG=$(git log -1 --pretty=%B "$REF")
-COMMIT_MSG="Sync from $REMOTE/$BRANCH: $UPSTREAM_MSG"
+# UPSTREAM_MSG=$(git log -1 --pretty=%B "$REF")
+UPSTREAM_MSG=$(git log -1 --pretty=%s "$REF")
+UPSTREAM_SHA=$(git log -1 --pretty=%h "$REF")
+COMMIT_MSG="Sync from $REMOTE/$BRANCH($UPSTREAM_SHA): $UPSTREAM_MSG"
 
 # --- Determine upstream file list -------------------------------------------
 
@@ -242,8 +264,6 @@ if [ $ANY_OVERRIDE -eq 0 ]; then
     fi
 fi
 
-echo -e "${GREEN}${PREFIX}Local state acceptable for sync.${RESET}"
-
 # --- Determine changed files -------------------------------------------------
 
 if git rev-parse HEAD >/dev/null 2>&1; then
@@ -265,17 +285,16 @@ if [ -z "$CHANGED" ]; then
     exit 0
 fi
 
-echo -e "${BLUE}${PREFIX}Files that will be updated:${RESET}"
-echo "$CHANGED"
-
 [ $DRY_RUN -eq 1 ] && {
+    echo -e "${BLUE}${PREFIX}Files that would be updated:${RESET}"
+    echo "$CHANGED"
     echo -e "${YELLOW}${PREFIX}[DRY RUN] Not modifying working tree.${RESET}"
     exit 0
 }
 
 # --- Selective apply of upstream tree ---------------------------------------
 
-echo -e "${BLUE}${PREFIX}Applying upstream tree with override semantics...${RESET}"
+# echo -e "${BLUE}${PREFIX}Applying upstream tree with override semantics...${RESET}"
 
 for f in $UPSTREAM_FILES; do
     is_tracked=0
@@ -312,10 +331,9 @@ for f in $UPSTREAM_FILES; do
         fi
     fi
 
-    echo -e "${BLUE}${PREFIX}Restoring:${RESET} $f"
+    echo -e "${BLUE}${PREFIX}Syncing:${RESET} $f"
     git restore --source "$REF" --worktree --staged -- "$f"
 done
-echo
 
 # --- Skip commit if nothing changed -----------------------------------------
 
@@ -329,24 +347,31 @@ fi
 if [ $NO_COMMIT -eq 1 ]; then
     echo -e "${YELLOW}${PREFIX}--no-commit enabled. Changes staged but not committed.${RESET}"
 else
-    git commit -m "$COMMIT_MSG"
-    echo
-    echo -e "${GREEN}${PREFIX}Committed sync at $SHA${RESET}"
+    git commit -m "$COMMIT_MSG" &>/dev/null
 fi
 
 # --- Mirror tags -------------------------------------------------------------
 
-TAGS=$(git tag --points-at "$SHA")
+TAGS=$(git tag --points-at "$SHA_remote")
 
 if [ -n "$TAGS" ]; then
     echo -e "${BLUE}${PREFIX}Mirroring tags:${RESET}"
     while IFS= read -r tag; do
         echo " - $tag"
-        git tag -f "$tag" "$SHA"
+        git tag -f "$tag" "$SHA_remote"
     done <<< "$TAGS"
     echo
 else
-    echo -e "${BLUE}${PREFIX}No tags to mirror.${RESET}"
+    # echo -e "${BLUE}${PREFIX}No tags to mirror.${RESET}"
+    :
 fi
 
-echo -e "${GREEN}${PREFIX}Sync complete.${RESET}"
+[ $DEBUG -eq 1 ] &&
+    {
+    echo local after synch:
+    git log --oneline --graph --decorate 
+    }
+
+SHA_local=$(git rev-parse --short=7 HEAD)
+echo -e "${GREEN}${PREFIX}Synced remote ($SHA_remote) in $SHA_local.${RESET}"
+
