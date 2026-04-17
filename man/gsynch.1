@@ -1,6 +1,7 @@
 .TH GSYNCH 1 "April 2026" "gsynch" "User Commands"
 .SH NAME
 gsynch \- deterministic one-way synchronization from a remote Git repository
+
 .SH SYNOPSIS
 .B gsynch
 [\fIoptions\fR]
@@ -42,12 +43,16 @@ under the specified path will be restored.
 .TP
 .BR --dry-run
 Show what would happen without modifying the working tree or index. No files
-are restored, no commits are created, and no stashes are made.
+are restored and no commits are created.
 
 .TP
 .BR --no-commit
-Apply changes and stage them, but do not create a commit. Useful for inspection
-or integration into larger workflows.
+Apply changes and stage them, but do not create a commit.
+
+.TP
+.BR --debug
+Enable verbose debugging output, including local and remote commit graphs and
+merge-base diagnostics.
 
 .SS Override Options
 \fBgsynch\fR classifies local state into three classes: staged, modified, and
@@ -58,12 +63,11 @@ The following options allow selective overriding of this protection:
 
 .TP
 .BR --override-staged
-Allow overwriting staged changes. Without this flag, the presence of staged
-changes causes \fBgsynch\fR to abort.
+Allow overwriting staged changes.
 
 .TP
 .BR --override-modified
-Allow overwriting modified tracked files in the working tree.
+Allow overwriting modified tracked files.
 
 .TP
 .BR --override-untracked
@@ -72,20 +76,22 @@ upstream tree.
 
 .TP
 .BR --override-all
-Equivalent to \fB--override-staged\fR, \fB--override-modified\fR, and
-\fB--override-untracked\fR. Allows all local changes and colliding untracked
-files to be overwritten.
+Equivalent to enabling all override flags.
+
+.SS Deletion Handling
+
+.TP
+.BR --no-local-delete
+Preserve local files even if they were deleted in the upstream repository.
+Upstream deletions are detected via diff-filter=D and skipped when this flag is
+set.
 
 .SS Forced Push Handling
 
 .TP
 .BR --allow-forced-push
 Allow synchronization to continue even if a forced push is detected on the
-upstream branch.
-
-By default, \fBgsynch\fR aborts when a forced push is detected to avoid
-silently rewriting local history. This option makes the destructive nature of
-continuing explicit.
+upstream branch. By default, \fBgsynch\fR aborts when a forced push is detected.
 
 .SS Help
 
@@ -103,8 +109,7 @@ git clone --branch BRANCH URL .
 git remote remove origin
 .fi
 
-and exits. This bootstraps the working tree without leaving a push-capable
-\fIorigin\fR remote.
+and exits.
 
 .SS Non-Git Directory
 If the directory is not a Git repository, \fBgsynch\fR runs:
@@ -115,21 +120,24 @@ git add .
 git commit -m "Initial import of existing working directory"
 .fi
 
-to create a baseline commit for deterministic diffs and restores.
+to create a baseline commit.
 
 .SS Local Change Classification
 \fBgsynch\fR classifies local state into:
 
 .IP 
 
+\[bu]
 \fIStaged\fR: tracked files with changes in the index.
 
 .IP 
 
+\[bu]
 \fIModified\fR: tracked files with changes in the working tree.
 
 .IP 
 
+\[bu]
 \fIUntracked\fR: files not tracked by Git.
 
 .SS Default Blocking Behavior
@@ -137,42 +145,36 @@ Without override flags:
 
 .IP 
 
+\[bu]
 Any staged or modified files cause \fBgsynch\fR to abort.
 
 .IP 
 
-Untracked files that would be overwritten by incoming files cause
-\fBgsynch\fR to abort.
+\[bu]
+Untracked files that would be overwritten cause \fBgsynch\fR to abort.
 
 .SS Override Semantics
 If any override flag is provided:
 
 .IP 
 
+\[bu]
 Classes with an override are overwritten.
 
 .IP 
 
-Classes without an override are preserved (skipped during restore).
+\[bu]
+Classes without an override are preserved.
 
-This allows fine-grained control over destructive behavior.
+.SS Upstream Deletion Behavior
+Upstream deletions are detected via:
 
-.SS Forced Push Detection
-After fetching, \fBgsynch\fR compares the previous and new upstream commit.
-If the previous commit is not an ancestor of the new commit, a forced push is
-detected.
+.nf
+git diff --name-status --diff-filter=D HEAD..REMOTE
+.fi
 
-Default behavior:
-
-.IP 
-
-Print a warning and abort.
-
-With \fB--allow-forced-push\fR:
-
-.IP 
-
-Continue despite the forced push.
+By default, deleted files are removed locally. With \fB--no-local-delete\fR,
+these deletions are skipped.
 
 .SS Subdirectory Synchronization
 Use:
@@ -181,25 +183,22 @@ Use:
 gsynch --only path/to/subdir
 .fi
 
-to restrict synchronization to a subtree of the upstream repository.
+to restrict synchronization to a subtree.
 
-.SS Dry Run Mode
-Use:
-
-.nf
-gsynch --dry-run
-.fi
-
-to preview all changes without modifying the working tree or index.
-
-.SS No Commit Mode
-Use:
+.SS Tag Mirroring
+After synchronization, tags pointing at the upstream commit are mirrored
+locally using:
 
 .nf
-gsynch --no-commit
+git tag -f TAG SHA
 .fi
 
-to stage changes without committing them.
+.SS Commit Message Format
+Automatic commits use the format:
+
+.nf
+Sync from REMOTE/BRANCH (SHA): SUBJECT
+.fi
 
 .SH ENVIRONMENT
 
@@ -209,7 +208,7 @@ Default URL for the upstream repository.
 
 .TP
 .B GSYNCH_BRANCH
-Default branch name for synchronization.
+Default branch name.
 
 .SH EXIT STATUS
 
@@ -219,12 +218,10 @@ Synchronization completed successfully or no changes were necessary.
 
 .TP
 >0
-An error occurred, or local state prevented synchronization under the current
-override and forced-push settings.
+An error occurred or local state prevented synchronization.
 
 .SH SEE ALSO
 git(1)
 
 .SH AUTHOR
-Written by Nadim.
-
+Written by Nadim Khemir.

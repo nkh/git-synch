@@ -177,7 +177,9 @@ SHA_remote=$(git rev-parse --short=7 "$REF")
 
 # --- Display header ----------------------------------------------------------
 
-echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$URL:$BRANCH$ ($SHA_remote)${RESET}"
+subject="$(git rev-list --format=%B --max-count=1 $REF | sed -n 2p)"
+
+echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$URL:$BRANCH\n${PREFIX}($SHA_remote) $subject ${RESET}"
 
 [ $DRY_RUN -eq 1 ] && echo -e "${YELLOW}${PREFIX}[DRY RUN ENABLED]${RESET}"
 
