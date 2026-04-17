@@ -21,6 +21,7 @@ OVERRIDE_MODIFIED=0
 OVERRIDE_UNTRACKED=0
 OVERRIDE_ALL=0
 ALLOW_FORCED_PUSH=0
+NO_LOCAL_DELETE=0
 
 prefix() { local prefix="$1" ; shift ; "$@" > >(sed 's/^/'$prefix' /') 2> >(sed 's/^/'${prefix}'ᵉ /' >&2)  ; }
 #
@@ -46,6 +47,7 @@ Options:
   --override-untracked        Allow overwriting untracked files
   --override-all              Allow overwriting all local changes (equivalent to all overrides)
 
+  --no-local-delete           keep file even if was deleted in the git repo
   --allow-forced-push         Allow synchronization to continue even if a forced push is detected
 
   --debug                     Show debug information
@@ -73,6 +75,7 @@ while [ $# -gt 0 ]; do
         --override-modified)  OVERRIDE_MODIFIED=1;    shift ;;
         --override-untracked) OVERRIDE_UNTRACKED=1;   shift ;;
         --override-all)       OVERRIDE_ALL=1;         shift ;;
+        --no-local-delete)    NO_LOCAL_DELETE=1;      shift ;;
 
         --allow-forced-push)  ALLOW_FORCED_PUSH=1;    shift ;;
 
@@ -132,14 +135,6 @@ if [ ${#files[@]} -eq 0 ]; then
     exit 0
 fi
 
-# --- Display header ----------------------------------------------------------
-
-echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$URL:$BRANCH${RESET}"
-
-[ $DRY_RUN -eq 1 ] && echo -e "${YELLOW}${PREFIX}[DRY RUN ENABLED]${RESET}"
-
-[ -n "$ONLY_PATH" ] && echo -e "${BLUE}${PREFIX}Syncing only subdirectory:${RESET} $ONLY_PATH"
-
 # --- Ensure working directory is a Git repo ----------------------------------
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -168,7 +163,8 @@ fi
 
 # --- Fetch and detect forced push -------------------------------------------
 
-OLD_SHA=$(git rev-parse --short=7 "$REMOTE/$BRANCH" 2>/dev/null || echo "")
+REF="$REMOTE/$BRANCH"
+OLD_SHA=$(git rev-parse --short=7 "$REF" 2>/dev/null || echo "")
 
 # echo -e "${BLUE}${PREFIX}Fetching ${BOLD}${REMOTE} (url: ${URL}, branch: ${BRANCH})...${RESET}"
 if [ $DRY_RUN -eq 0 ]; then
@@ -177,7 +173,17 @@ else
     git fetch "$REMOTE" --dry-run
 fi
 
-NEW_SHA=$(git rev-parse --short=7 "$REMOTE/$BRANCH")
+SHA_remote=$(git rev-parse --short=7 "$REF")
+
+# --- Display header ----------------------------------------------------------
+
+echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$URL:$BRANCH$ ($SHA_remote)${RESET}"
+
+[ $DRY_RUN -eq 1 ] && echo -e "${YELLOW}${PREFIX}[DRY RUN ENABLED]${RESET}"
+
+[ -n "$ONLY_PATH" ] && echo -e "${BLUE}${PREFIX}Syncing only subdirectory:${RESET} $ONLY_PATH"
+
+# -----------------------------------------------------------------------------
 
 [ $DEBUG -eq 1 ] &&
     {
@@ -185,16 +191,16 @@ NEW_SHA=$(git rev-parse --short=7 "$REMOTE/$BRANCH")
     git log --oneline --graph --decorate
 
     echo remote:
-    git log "$REMOTE/$BRANCH" --oneline --graph --decorate
+    git log "$REF" --oneline --graph --decorate
 
-    echo check with: git merge-base --is-ancestor "$OLD_SHA" "$NEW_SHA"
+    echo check with: git merge-base --is-ancestor "$OLD_SHA" "$SHA_remote"
     }
 
-if [ -n "$OLD_SHA" ] && [ "$OLD_SHA" != "$NEW_SHA" ]; then
+if [ -n "$OLD_SHA" ] && [ "$OLD_SHA" != "$SHA_remote" ]; then
 
-    # echo -e "${BLUE}${PREFIX}Checking for forced push...${RESET}"
+    echo -e "${BLUE}${PREFIX}Checking for forced push...${RESET}"
 
-    if git merge-base --is-ancestor "$OLD_SHA" "$NEW_SHA"; then
+    if git merge-base --is-ancestor "$OLD_SHA" "$SHA_remote"; then
         :
     else
         echo -e "${YELLOW}${PREFIX}Upstream branch is force-pushed; sync would override history.${RESET}"
@@ -208,22 +214,20 @@ if [ -n "$OLD_SHA" ] && [ "$OLD_SHA" != "$NEW_SHA" ]; then
     fi
 fi
 
-REF="$REMOTE/$BRANCH"
-SHA_remote=$(git rev-parse --short=7 "$REF")
-
 # --- Upstream commit message -------------------------------------------------
 
 # UPSTREAM_MSG=$(git log -1 --pretty=%B "$REF")
 UPSTREAM_MSG=$(git log -1 --pretty=%s "$REF")
 UPSTREAM_SHA=$(git log -1 --pretty=%h "$REF")
-COMMIT_MSG="Sync from $REMOTE/$BRANCH($UPSTREAM_SHA): $UPSTREAM_MSG"
+COMMIT_MSG="Sync from $REF ($UPSTREAM_SHA): $UPSTREAM_MSG"
 
 # --- Determine upstream file list -------------------------------------------
 
 if [ -n "$ONLY_PATH" ]; then
-    UPSTREAM_FILES=$(git ls-tree -r --name-only "$REF" -- "$ONLY_PATH")
+    UPSTREAM_FILES=$(git diff --name-only "$REF" -- "$ONLY_PATH")
 else
-    UPSTREAM_FILES=$(git ls-tree -r --name-only "$REF")
+    # UPSTREAM_FILES=$(git ls-tree -r --name-only "$REF")
+    UPSTREAM_FILES=$(git diff --name-only "$REF")
 fi
 
 # --- Local state classification ----------------------------------------------
@@ -268,9 +272,9 @@ fi
 
 if git rev-parse HEAD >/dev/null 2>&1; then
     if [ -n "$ONLY_PATH" ]; then
-        CHANGED=$(git diff --name-status HEAD.."$REF" -- "$ONLY_PATH")
+        CHANGED=$(git diff --name-status "$REF" -- "$ONLY_PATH")
     else
-        CHANGED=$(git diff --name-status HEAD.."$REF")
+        CHANGED=$(git diff --name-status "$REF")
     fi
 else
     if [ -n "$ONLY_PATH" ]; then
@@ -280,26 +284,30 @@ else
     fi
 fi
 
+[ $DRY_RUN -eq 1 ] && {
+
+    if [ -n "$CHANGED" ]; then
+        echo -e "${BLUE}${PREFIX}Files that would be updated:${RESET}"
+        echo "$CHANGED"
+    fi
+
+    echo -e "${YELLOW}${PREFIX}[DRY RUN] Not modifying working tree.${RESET}"
+    exit 0
+}
+
 if [ -z "$CHANGED" ]; then
     echo -e "${GREEN}${PREFIX}Already up to date. No changes.${RESET}"
     exit 0
 fi
-
-[ $DRY_RUN -eq 1 ] && {
-    echo -e "${BLUE}${PREFIX}Files that would be updated:${RESET}"
-    echo "$CHANGED"
-    echo -e "${YELLOW}${PREFIX}[DRY RUN] Not modifying working tree.${RESET}"
-    exit 0
-}
 
 # --- Selective apply of upstream tree ---------------------------------------
 
 # echo -e "${BLUE}${PREFIX}Applying upstream tree with override semantics...${RESET}"
 
 for f in $UPSTREAM_FILES; do
-    is_tracked=0
     is_staged=0
     is_modified=0
+    is_tracked=0
     is_untracked=0
 
     if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
@@ -316,22 +324,38 @@ for f in $UPSTREAM_FILES; do
         fi
     fi
 
-    if [ $ANY_OVERRIDE -eq 1 ]; then
+    if git diff --name-status --diff-filter=A HEAD.."$REF" -- "$f" | grep -q . ; then
+        upstream_state='added'
+    elif git diff --name-status --diff-filter=D HEAD.."$REF" -- "$f" | grep -q . ; then
+        upstream_state="${YELLOW}deleted${RESET}"
+        if [ $NO_LOCAL_DELETE -eq 1 ] ; then
+            echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$f${RESET}${BLUE} "\
+                    "(staged: $is_staged, modified: $is_modified, untracked: $is_untracked, upstream: $upstream_state${BLUE})${RESET}"\
+                    "${YELLOW} [preserved]{RESET}"
+            continue
+        fi
+    else
+        upstream_state='modified'
+    fi
+
+    # if [ $ANY_OVERRIDE -eq 1 ]; then
         if [ $is_staged -eq 1 ] && [ $OVERRIDE_STAGED -eq 0 ]; then
-            echo -e "${YELLOW}${PREFIX}Preserving staged file:${RESET} $f"
+            echo -e "${YELLOW}${PREFIX}Preserving staged file: $f (staged: $is_staged, modified: $is_modified, untracked: $is_untracked)${RESET}"
             continue
         fi
         if [ $is_modified -eq 1 ] && [ $OVERRIDE_MODIFIED -eq 0 ]; then
-            echo -e "${YELLOW}${PREFIX}Preserving modified file:${RESET} $f"
+            echo -e "${YELLOW}${PREFIX}Preserving modified file: $f (staged: $is_staged, modified: $is_modified, untracked: $is_untracked)${RESET}"
             continue
         fi
         if [ $is_untracked -eq 1 ] && [ $OVERRIDE_UNTRACKED -eq 0 ]; then
-            echo -e "${YELLOW}${PREFIX}Preserving untracked file:${RESET} $f"
+            echo -e "${YELLOW}${PREFIX}Preserving untracked file: $f (staged: $is_staged, modified: $is_modified, untracked: $is_untracked)${RESET}"
             continue
         fi
-    fi
+    # fi
 
-    echo -e "${BLUE}${PREFIX}Syncing:${RESET} $f"
+    echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$f${RESET}${BLUE}"\
+            " (staged: $is_staged, modified: $is_modified, untracked: $is_untracked, upstream: $upstream_state${BLUE})${RESET}"
+
     git restore --source "$REF" --worktree --staged -- "$f"
 done
 

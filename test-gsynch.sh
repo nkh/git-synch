@@ -41,7 +41,7 @@ test_basic_sync() {
     cd "$wd"
     touch abc
 
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" &>/dev/null
 
     [ -f file.txt ] || fail "file.txt not synced"
     grep -q "hello" file.txt || fail "file.txt content mismatch"
@@ -57,8 +57,8 @@ test_dry_run_no_changes() {
     cd "$wd"
     touch abc
 
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main --dry-run >out.log
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main --dry-run >out.log
 
     grep -q "Not modifying working tree" out.log || fail "dry-run up-to-date message missing"
     ok "dry-run on up-to-date repo works"
@@ -72,13 +72,13 @@ test_untracked_collision_blocks() {
     wd=$(tmpdir)
     cd "$wd"
     touch abc
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
 
     git rm -f file.txt >/dev/null
     git commit -q -m "remove file.txt"
     echo "local" > file.txt  # untracked overwrite candidate
 
-    if GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>err.log; then
+    if "$GSYNCH_BIN" --url "$upstream" --branch main &>err.log; then
         fail "gsynch should fail on untracked collision"
     fi
     grep -q "untracked files would be overwritten" err.log || fail "collision message missing"
@@ -95,12 +95,12 @@ test_uncommitted_blocks() {
     cd "$wd"
 
     touch abc
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
 
     echo "changed" > file.txt
     git add file.txt >/dev/null
 
-    if GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main >err.log ; then
+    if "$GSYNCH_BIN" --url "$upstream" --branch main >err.log ; then
         fail "gsynch should fail on uncommitted files"
     fi
 
@@ -117,11 +117,11 @@ test_modified_blocks() {
     cd "$wd"
 
     touch abc
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
 
     echo "changed" > file.txt  # modified but not staged
 
-    if GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main >err.log ; then
+    if "$GSYNCH_BIN" --url "$upstream" --branch main >err.log ; then
         fail "gsynch should fail on modified files"
     fi
 
@@ -137,12 +137,14 @@ test_override_staged_allows_overwrite() {
     wd=$(tmpdir)
     cd "$wd"
     touch abc
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+
+    "$GSYNCH_BIN" --url "$upstream" --branch main --no-local-delete &>/dev/null
 
     echo "changed" > file.txt
     git add file.txt >/dev/null
 
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main --override-staged &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main --override-staged &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main --override-staged &>/dev/null
 
     grep -q "hello" file.txt || fail "override-staged did not overwrite file.txt"
     ok "override-staged overwrites staged changes"
@@ -156,11 +158,11 @@ test_override_modified_allows_overwrite() {
     wd=$(tmpdir)
     cd "$wd"
     touch abc
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
 
     echo "changed" > file.txt  # modified but not staged
 
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main --override-modified &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main --override-modified &>/dev/null
 
     grep -q "hello" file.txt || fail "override-modified did not overwrite file.txt"
     ok "override-modified overwrites modified tracked files"
@@ -174,13 +176,13 @@ test_override_untracked_allows_overwrite() {
     wd=$(tmpdir)
     cd "$wd"
     touch abc
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
 
     git rm -f file.txt >/dev/null
     git commit -q -m "remove file.txt"
     echo "local" > file.txt  # untracked overwrite candidate
 
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main --override-untracked &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main --override-untracked &>/dev/null
 
     grep -q "hello" file.txt || fail "override-untracked did not overwrite file.txt"
     ok "override-untracked overwrites colliding untracked files"
@@ -194,12 +196,12 @@ test_override_all_allows_overwrite() {
     wd=$(tmpdir)
     cd "$wd"
     touch abc
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
 
     echo "local" > file.txt
     echo "extra" > extra.txt
 
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main --override-all &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main --override-all &>/dev/null
 
     grep -q "hello" file.txt || fail "override-all did not overwrite file.txt"
     [ -f extra.txt ] || fail "extra.txt should remain (not in upstream)"
@@ -218,14 +220,14 @@ test_forced_push_blocks_without_flag() {
     cd "$wd"
     touch abc # should not be needed as gsynch works with empty worktree
 
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
 
     # Force-push upstream
     echo "hello2" > "$upstream/file.txt"
     git -C "$upstream" add file.txt
     git -C "$upstream" commit -q -m "remote update"
 
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
 
     git -C "$upstream" reset --hard HEAD~1 >/dev/null
     touch "$upstream/remote_new_file"
@@ -249,7 +251,7 @@ test_forced_push_allows_with_flag() {
     wd=$(tmpdir)
     cd "$wd"
     touch abc
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
 
     echo "hello2" > "$upstream/file.txt"
     git -C "$upstream" add file.txt
@@ -257,7 +259,7 @@ test_forced_push_allows_with_flag() {
     git -C "$upstream" reset --hard HEAD~1 >/dev/null
     git -C "$upstream" cherry-pick HEAD@{1} >/dev/null 2>&1 || true
 
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main --allow-forced-push &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main --allow-forced-push &>/dev/null
 
     grep -q "hello2" file.txt || fail "forced push with flag did not update file.txt"
     ok "forced push allowed with flag"
@@ -281,7 +283,7 @@ test_large_repo_performance() {
     touch marker
 
     local start=$SECONDS
-    GSYNCH_URL="$upstream" GSYNCH_BRANCH="main" "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
+    "$GSYNCH_BIN" --url "$upstream" --branch main &>/dev/null
     local elapsed=$((SECONDS - start))
 
     [ -f file_1.txt ] || fail "large repo sync missing file_1.txt"

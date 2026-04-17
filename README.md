@@ -10,11 +10,11 @@ Unlike `git pull`, `gsynch` never merges, never rebases, and never rewrites your
 
 Many workflows need a “pull‑from‑upstream‑but‑never‑push‑back” mechanism:
 
-- Importing vendor libraries into your project  
-- Keeping template directories up to date  
-- Mirroring a shared configuration repo  
 - Updating generated assets  
 - Syncing boilerplate across multiple projects  
+- Keeping template directories up to date  
+- Importing vendor libraries into your project  
+- Mirroring a shared configuration repo  
 
 `gsynch` solves this cleanly:
 
@@ -22,9 +22,8 @@ Many workflows need a “pull‑from‑upstream‑but‑never‑push‑back” m
 - No rebases  
 - No accidental pushes  
 - No silent overwrites  
-- No surprises  
 
-You get a deterministic, reproducible update every time.
+A deterministic, reproducible update every time.
 
 ---
 
@@ -78,6 +77,14 @@ Stage updates without committing:
 gsynch --no-commit
 ```
 
+### No-local-delete
+Don't delete local files deleted in the remote repo:
+
+```
+gsynch --no-local-delete
+```
+
+
 ### Automatic repo initialization  
 If your directory is not a Git repo, `gsynch` will initialize one and create a baseline commit.
 
@@ -98,7 +105,8 @@ This gives you a clean working tree without a push‑capable `origin`.
 ### Local installation
 
 ```
-./gsynch/install.sh
+chmod a+x install 
+./install
 ```
 
 ### Remote installation
