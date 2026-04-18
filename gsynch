@@ -107,7 +107,7 @@ fi
 
 sanitize() { echo "$1" | sed 's/[^A-Za-z0-9_-]/_/g' ; }
 
-REMOTE="$(sanitize "${URL}")"
+REMOTE="$(sanitize "${URL#https://}")"
 
 if [ $missing -eq 1 ]; then
     echo -e "${YELLOW}${PREFIX}Aborting due to missing required configuration.${RESET}"
@@ -166,7 +166,6 @@ fi
 REF="$REMOTE/$BRANCH"
 OLD_SHA=$(git rev-parse --short=7 "$REF" 2>/dev/null || echo "")
 
-# echo -e "${BLUE}${PREFIX}Fetching ${BOLD}${REMOTE} (url: ${URL}, branch: ${BRANCH})...${RESET}"
 if [ $DRY_RUN -eq 0 ]; then
     git fetch "$REMOTE" &>/dev/null
 else
@@ -175,11 +174,20 @@ fi
 
 SHA_remote=$(git rev-parse --short=7 "$REF")
 
+[ -n $OLD_SHA ] && commits_count=$(git rev-list --count $OLD_SHA.."$REF") || commits_count=0 
+# [ $commits_count -le 1 ] && display_count='' || display_count="(commits: $commits_count)"
+display_count="(commits: $commits_count)"
+
+#
 # --- Display header ----------------------------------------------------------
 
-subject="$(git rev-list --format=%B --max-count=1 $REF | sed -n 2p)"
+# subject="$(git rev-list --format='%B' --max-count=1 $REF | sed -n 2p)"
+# relative_time="$(git rev-list --format='%ar' --max-count=1 $REF | sed -n 2p)"
 
-echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$URL:$BRANCH\n${PREFIX}($SHA_remote) $subject ${RESET}"
+echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$URL:$BRANCH $display_count${RESET}"
+
+git rev-list --format='(%h) %s (%ar)' --max-count=$commits_count "$REF" | \
+    while IFS= read ignore ; read S ; do echo -e "${BLUE}${PREFIX}${BOLD}$S${RESET}" ; done
 
 [ $DRY_RUN -eq 1 ] && echo -e "${YELLOW}${PREFIX}[DRY RUN ENABLED]${RESET}"
 
