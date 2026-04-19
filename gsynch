@@ -42,13 +42,13 @@ Options:
   --dry-run                   Show what would happen without modifying anything
   --no-commit                 Apply changes but do not commit
 
-  --override-staged           Allow overwriting staged changes
-  --override-modified         Allow overwriting modified tracked files
-  --override-untracked        Allow overwriting untracked files
-  --override-all              Allow overwriting all local changes (equivalent to all overrides)
+  --override-staged, -S       Allow overwriting staged changes
+  --override-modified, -M     Allow overwriting modified tracked files
+  --override-untracked, -U    Allow overwriting untracked files
+  --override-all, -A          Allow overwriting all local changes (equivalent to all overrides)
 
-  --no-local-delete           keep file even if was deleted in the git repo
-  --allow-forced-push         Allow synchronization to continue even if a forced push is detected
+  --no-local-delete, -N       keep file even if was deleted in the git repo
+  --allow-forced-push, -F     Allow synchronization to continue even if a forced push is detected
 
   --debug                     Show debug information
   -h, --help                  Show this help message
@@ -71,11 +71,11 @@ while [ $# -gt 0 ]; do
         --no-commit)          NO_COMMIT=1;            shift ;;
         --debug)              DEBUG=1;                shift ;;
  
-        --override-staged)    OVERRIDE_STAGED=1;      shift ;;
-        --override-modified)  OVERRIDE_MODIFIED=1;    shift ;;
-        --override-untracked) OVERRIDE_UNTRACKED=1;   shift ;;
-        --override-all)       OVERRIDE_ALL=1;         shift ;;
-        --no-local-delete)    NO_LOCAL_DELETE=1;      shift ;;
+        -S|--override-staged)    OVERRIDE_STAGED=1;      shift ;;
+        -M|--override-modified)  OVERRIDE_MODIFIED=1;    shift ;;
+        -U|--override-untracked) OVERRIDE_UNTRACKED=1;   shift ;;
+        -A|--override-all)       OVERRIDE_ALL=1;         shift ;;
+        -N|--no-local-delete)    NO_LOCAL_DELETE=1;      shift ;;
 
         --allow-forced-push)  ALLOW_FORCED_PUSH=1;    shift ;;
 
@@ -176,15 +176,18 @@ SHA_remote=$(git rev-parse --short=7 "$REF")
 
 [ -n $OLD_SHA ] && commits_count=$(git rev-list --count $OLD_SHA.."$REF") || commits_count=0 
 # [ $commits_count -le 1 ] && display_count='' || display_count="(commits: $commits_count)"
-display_count="(commits: $commits_count)"
-
 #
+display_count="(unfetched commits: $commits_count)"
+
 # --- Display header ----------------------------------------------------------
 
 # subject="$(git rev-list --format='%B' --max-count=1 $REF | sed -n 2p)"
 # relative_time="$(git rev-list --format='%ar' --max-count=1 $REF | sed -n 2p)"
 
 echo -e "${BLUE}${PREFIX}Syncing ${BOLD}$URL:$BRANCH $display_count${RESET}"
+
+[[ -n $OLD_SHA && 0 -eq $commits_count ]] && echo -e "${BLUE}${PREFIX}Remote up to date, last 5 fetched commits:${RESET}" && commits_count=5
+
 
 git rev-list --format='(%h) %s (%ar)' --max-count=$commits_count "$REF" | \
     while IFS= read ignore ; read S ; do echo -e "${BLUE}${PREFIX}${BOLD}$S${RESET}" ; done
